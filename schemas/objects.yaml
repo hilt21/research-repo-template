@@ -1,0 +1,130 @@
+# JSON Schema fragments plus required Markdown sections. Single contract source.
+common:
+  type: object
+  required: [type, title, status, research]
+  properties:
+    type: {enum: [Topic, Source, Claim, Entity, Event, Relation, Task, ResearchTrace, Artifact]}
+    title: {type: string, minLength: 1}
+    status: {enum: [draft, stable, deprecated]}
+    resource: {type: string, minLength: 1}
+    sources:
+      type: array
+      items:
+        type: object
+        required: [id, resource]
+        properties:
+          id: {type: string, minLength: 1}
+          resource: {type: string, minLength: 1}
+    research:
+      type: object
+      required: [id]
+      properties:
+        id: {type: string, pattern: '^[a-z][a-z0-9_-]+$'}
+        traces: {type: array, items: {type: string, minLength: 1}, uniqueItems: true}
+        claims: {type: array, items: {type: string, minLength: 1}, uniqueItems: true}
+        inspected_sources: {type: array, items: {type: string, minLength: 1}}
+        task: {type: string, minLength: 1}
+        proposed_changes: {type: array, items: {type: string, minLength: 1}}
+types:
+  Topic:
+    directory: knowledge
+    sections: [研究问题, 范围, 完成标准]
+    schema: {}
+  Source:
+    directory: knowledge/sources
+    sections: [来源说明, 获取情况]
+    schema:
+      required: [resource]
+      properties:
+        research:
+          required: [retrieved_at, publisher]
+          properties:
+            retrieved_at: {type: string, format: date-time}
+            publisher: {type: string, minLength: 1}
+            snapshot:
+              type: object
+              required: [path, sha256]
+              properties:
+                path: {type: string, pattern: '^\.cache/sources/'}
+                sha256: {type: string, pattern: '^[a-f0-9]{64}$'}
+  Claim:
+    directory: knowledge/claims
+    sections: [命题, 适用条件, 提出依据, 待验证事项]
+    schema:
+      properties:
+        research:
+          required: [claim_state, traces]
+          properties:
+            claim_state: {enum: [hypothesis, supported, contested, rejected]}
+            traces: {minItems: 1}
+            evidence:
+              type: array
+              items:
+                type: object
+                required: [source_id, locator, role]
+                properties:
+                  source_id: {type: string, minLength: 1}
+                  locator: {type: string, minLength: 1}
+                  role: {enum: [supports, challenges, context]}
+  Entity:
+    directory: knowledge/entities
+    sections: [对象描述]
+    schema: {}
+  Event:
+    directory: knowledge/events
+    sections: [事件, 研究意义]
+    schema:
+      required: [sources]
+      properties:
+        sources: {minItems: 1}
+        research:
+          required: [occurred_at]
+          properties:
+            occurred_at: {type: string, minLength: 1}
+  Relation:
+    directory: knowledge/relations
+    sections: [关系描述, 有效条件]
+    schema:
+      properties:
+        research:
+          required: [from, to, predicate, attributes]
+          properties:
+            from: {type: string, minLength: 1}
+            to: {type: string, minLength: 1}
+            predicate: {type: string, minLength: 1}
+            attributes: {type: object, minProperties: 1}
+  Task:
+    directory: tasks
+    sections: [目标, 完成标准, 进度, 下一步]
+    schema:
+      properties:
+        research:
+          required: [task_state, traces]
+          properties:
+            task_state: {enum: [open, active, blocked, done]}
+  ResearchTrace:
+    directory: traces
+    sections: [研究问题, 检索与阅读, 暂定发现, 证据取舍, 证据缺口, 下一步, 本轮知识变化]
+    schema:
+      properties:
+        research:
+          required: [saved_at, inspected_sources, proposed_changes]
+          properties:
+            saved_at: {type: string, format: date-time}
+  Artifact:
+    directory: artifacts
+    sections: [研究输出, 局限与待验证事项]
+    schema:
+      properties:
+        research:
+          required: [review_state, claims]
+          properties:
+            review_state: {enum: [draft, current, needs_review]}
+config:
+  type: object
+  required: [protocol_version, initialized, topic, language]
+  properties:
+    protocol_version: {const: '0.1'}
+    initialized: {type: boolean}
+    topic: {type: [string, 'null']}
+    language: {const: zh-CN}
