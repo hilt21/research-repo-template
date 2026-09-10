@@ -6,3 +6,10 @@ __pycache__/
 .coverage
 htmlcov/
 .DS_Store
+
+# Personal notes, temporary reports and local exports
+/.local/
+
+# Additional coverage outputs
+.coverage.*
+/coverage.xml

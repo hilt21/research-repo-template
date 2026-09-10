@@ -9,7 +9,7 @@ from pathlib import Path
 
 import yaml
 from core import CONTRACT, initialize, scaffold, validate
-from operations import build_index, mark_affected, snapshot_source
+from operations import build_index, mark_affected, snapshot_source, work_context
 from review import accept, git, head, prepare
 
 
@@ -25,7 +25,8 @@ def main() -> int:
     new.add_argument('--title', required=True)
     commands.add_parser('check')
     commands.add_parser('index')
-    commands.add_parser('status')
+    status = commands.add_parser('status')
+    status.add_argument('--target', help='需要恢复的 Task、Trace 或 Deliverable 相对路径')
     snap = commands.add_parser('snapshot')
     snap.add_argument('file', type=Path)
     impact = commands.add_parser('impact')
@@ -62,6 +63,8 @@ def main() -> int:
             result = {'accepted_base': head(root),
                       'working_changes': git(root, 'status', '--short', '--', '.').stdout.decode(),
                       'note': '工作区变化尚未入库；Trace 内容即使已提交仍为过程记录。'}
+            if args.target:
+                result.update(work_context(root, args.target))
         elif args.command == 'prepare':
             ticket = prepare(root, args.files)
             result = {'ticket': ticket, **json.loads((root / ticket).read_text()),

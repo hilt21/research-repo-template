@@ -3,7 +3,7 @@ common:
   type: object
   required: [type, title, status, research]
   properties:
-    type: {enum: [Topic, Source, Claim, Entity, Event, Relation, Task, ResearchTrace, Artifact]}
+    type: {enum: [Topic, Source, Claim, Entity, Event, Relation, Task, ResearchTrace, Artifact, Deliverable]}
     title: {type: string, minLength: 1}
     status: {enum: [draft, stable, deprecated]}
     resource: {type: string, minLength: 1}
@@ -24,8 +24,26 @@ common:
         claims: {type: array, items: {type: string, minLength: 1}, uniqueItems: true}
         inspected_sources: {type: array, items: {type: string, minLength: 1}}
         task: {type: string, minLength: 1}
+        deliverable: {type: string, minLength: 1}
+        dependencies:
+          type: array
+          items: {type: string, minLength: 1}
+          uniqueItems: true
+        basis:
+          type: object
+          propertyNames: {type: string, minLength: 1}
+          additionalProperties: {type: string, pattern: '^[a-f0-9]{64}$'}
         proposed_changes: {type: array, items: {type: string, minLength: 1}}
 types:
+  Deliverable:
+    directory: deliverables
+    sections: [目标, 受众, 范围, 完成标准]
+    schema:
+      properties:
+        research:
+          required: [deliverable_state]
+          properties:
+            deliverable_state: {enum: [active, done]}
   Topic:
     directory: knowledge
     sections: [研究问题, 范围, 完成标准]
@@ -111,6 +129,15 @@ types:
           required: [saved_at, inspected_sources, proposed_changes]
           properties:
             saved_at: {type: string, format: date-time}
+            handoff:
+              type: object
+              required: [target, source, locator, base]
+              additionalProperties: false
+              properties:
+                target: {type: string, minLength: 1}
+                source: {type: string, minLength: 1}
+                locator: {type: string, minLength: 1}
+                base: {type: [string, 'null'], pattern: '^[a-f0-9]{40,64}$'}
   Artifact:
     directory: artifacts
     sections: [研究输出, 局限与待验证事项]

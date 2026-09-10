@@ -16,7 +16,7 @@ from jsonschema import Draft202012Validator, FormatChecker
 from markdown_it import MarkdownIt
 
 BASE = Path(__file__).resolve().parent.parent
-AREAS = ('knowledge', 'traces', 'tasks', 'artifacts')
+AREAS = ('knowledge', 'traces', 'tasks', 'artifacts', 'deliverables')
 MARKDOWN = MarkdownIt('commonmark')
 
 
@@ -202,6 +202,59 @@ def markdown_links(body: str) -> list[str]:
     return found
 
 
+def dependency_state(root: Path, doc: Document, docs: dict[Path, Document]) -> dict:
+    """Compare explicit dependencies and their sources with a recorded content basis.
+
+    Task/Trace history links are navigation, not dependencies. Never rewrite a basis
+    during inspection: an agent must first review the changed meaning.
+    """
+    by_id = {d.meta['research']['id']: d for d in docs.values()}
+    pending = [doc]
+    visited = {doc.path}
+    fingerprints = {}
+    missing = []
+    while pending:
+        current = pending.pop()
+        research = current.meta['research']
+        references = list(research.get('dependencies', []))
+        if research.get('deliverable'):
+            references.append(research['deliverable'])
+        if current.meta['type'] == 'ResearchTrace' and research.get('handoff'):
+            references += [research['handoff']['target'], research['handoff']['source']]
+        ids = research.get('claims', []) + research.get('inspected_sources', [])
+        if current.meta['type'] == 'Claim':
+            ids += [entry['source_id'] for entry in research.get('evidence', [])]
+        # OKF also permits external citation labels without local Source records.
+        ids += [entry['id'] for entry in current.meta.get('sources', []) if entry['id'] in by_id]
+        for ident in ids:
+            if ident in by_id:
+                references.append(by_id[ident].path.relative_to(root).as_posix())
+            else:
+                missing.append(f'引用 ID 不存在: {ident}')
+        for relative in references:
+            path = confined(root, relative)
+            if Path(relative).is_absolute() or '..' in Path(relative).parts:
+                raise ValueError(f'依赖必须使用实例内相对路径: {relative}')
+            if path in visited:
+                continue
+            visited.add(path)
+            if path not in docs or path.is_symlink():
+                missing.append(f'依赖记录不存在或不是普通文件: {relative}')
+                continue
+            fingerprints[relative] = hashlib.sha256(path.read_bytes()).hexdigest()
+            pending.append(docs[path])
+    basis = doc.meta['research'].get('basis')
+    for relative in basis or {}:
+        confined(root, relative)
+        if Path(relative).is_absolute() or '..' in Path(relative).parts:
+            raise ValueError(f'依赖基线必须使用实例内相对路径: {relative}')
+    changes = sorted(p for p in set(basis or {}) | set(fingerprints)
+                     if basis is not None and basis.get(p) != fingerprints.get(p))
+    state = 'needs_review' if changes or missing else 'unrecorded' if basis is None else 'current'
+    return {'state': state, 'fingerprints': dict(sorted(fingerprints.items())),
+            'changes': changes, 'missing': sorted(set(missing))}
+
+
 def validate(root: Path) -> list[Issue]:
     root = root.resolve()
     issues = []
@@ -280,12 +333,22 @@ def validate(root: Path) -> list[Issue]:
     elif docs or config['topic'] is not None:
         add(config_path, '未初始化模板不能包含研究条目')
 
+    valid_docs = {p: d for p, d in docs.items()
+                  if not schema_errors(CONTRACT['types'][d.meta['type']]['schema'], d.meta)}
     used_sources = set()
     for path, doc in docs.items():
         meta, research = doc.meta, doc.meta['research']
         # Skip secondary checks on malformed per-type data, preserving primary errors.
         if schema_errors(CONTRACT['types'][meta['type']]['schema'], meta):
             continue
+        try:
+            fresh = dependency_state(root, doc, valid_docs)
+            for message in fresh['missing']:
+                add(path, message)
+            if fresh['changes']:
+                add(path, '依赖变化，需语义复核: ' + ', '.join(fresh['changes']), 'warning')
+        except (ValueError, OSError) as exc:
+            add(path, str(exc))
         targets = markdown_links(doc.body)
         if meta['type'] == 'Source':
             targets.append(meta['resource'])
@@ -313,11 +376,28 @@ def validate(root: Path) -> list[Issue]:
                         add(path, f'引用不存在或类型不匹配: {relative}')
                 except ValueError as exc:
                     add(path, str(exc))
-        if research.get('task'):
+        references = []
+        for key, kind in (('task', 'Task'), ('deliverable', 'Deliverable')):
+            if research.get(key):
+                references.append((research[key], (kind,)))
+        if research.get('deliverable') and meta['type'] not in ('Task', 'Artifact'):
+            add(path, '只有 Task 或 Artifact 可以关联 deliverable')
+        if 'handoff' in research:
+            if meta['type'] != 'ResearchTrace':
+                add(path, '交接入口必须位于 ResearchTrace')
+                continue
+            record = research['handoff']
+            references.extend([(record['target'], ('Task', 'Deliverable')),
+                               (record['source'], ('Source',))])
+            if not doc.sections.get('交接入口'):
+                add(path, '交接入口元数据需要非空交接入口章节')
+            if research.get('task') and research['task'] != record['target']:
+                add(path, '交接入口 target 与 Trace task 必须一致；交付级交接省略 task')
+        for relative, kinds in references:
             try:
-                target = confined(root, research['task'])
-                if target not in docs or docs[target].meta['type'] != 'Task':
-                    add(path, 'Task 引用不存在或类型错误')
+                target = confined(root, relative)
+                if target not in docs or docs[target].meta['type'] not in kinds:
+                    add(path, f'{"/".join(kinds)} 引用不存在或类型错误: {relative}')
             except ValueError as exc:
                 add(path, str(exc))
         for relative in research.get('proposed_changes', []):
